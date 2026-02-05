@@ -1,0 +1,21 @@
+# ─── Backups (contain proprietary Anthropic code) ───
+backups/
+
+# ─── Legacy working directory (local analysis files) ───
+ext-study/
+
+# ─── Internal planning docs (contain local paths) ───
+task_plan.md
+findings.md
+progress.md
+
+# ─── Windows/WSL artifacts ───
+*:Zone.Identifier
+
+# ─── Python ───
+__pycache__/
+*.pyc
+
+# ─── OS ───
+.DS_Store
+Thumbs.db

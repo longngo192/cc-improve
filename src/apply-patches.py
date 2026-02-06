@@ -366,6 +366,29 @@ def detect_footer_component(content, css_var="WJ"):
     return "dP1"  # default fallback
 
 
+def detect_signal_hook(content, css_var="WJ"):
+    """Detect the signal reactivity hook name (_Z, MZ, etc.) called at start of footer function."""
+    footer_pos = content.find(f'className:{css_var}.inputFooter')
+    if footer_pos == -1:
+        footer_pos = content.find(f'className: {css_var}.inputFooter')
+    if footer_pos == -1:
+        return "_Z"  # default fallback
+
+    # Find the footer function definition (last function before inputFooter)
+    search_start = max(0, footer_pos - 5000)
+    chunk = content[search_start:footer_pos]
+    fn_matches = list(re.finditer(r'function \w+\(\{[^}]+\}\)\{', chunk))
+    if not fn_matches:
+        fn_matches = list(re.finditer(r'function \w+\([^)]+\)\{', chunk))
+    if fn_matches:
+        body_start = fn_matches[-1].end()
+        body = chunk[body_start:body_start+30]
+        call = re.match(r'(\w+)\(\)', body)
+        if call:
+            return call.group(1)
+    return "_Z"  # default fallback
+
+
 def detect_footer_function(content, css_var="WJ"):
     """Detect the function name containing the inputFooter return (Yi0, Zi0, etc.)."""
     # Find the position of inputFooter usage in the code
@@ -401,7 +424,8 @@ def patch_js():
     css_var = detect_css_module_var(content)
     react_var = detect_react_var(content, css_var)
     footer_comp = detect_footer_component(content, css_var)
-    print(f"  Detected: CSS={css_var}, React={react_var}, FooterComp={footer_comp}")
+    signal_hook = detect_signal_hook(content, css_var)
+    print(f"  Detected: CSS={css_var}, React={react_var}, FooterComp={footer_comp}, SignalHook={signal_hook}")
 
     # ─── PATCH 0a: usageData signal - add individual token fields ───
     if 'inputTokens:0' not in content and 'inputTokens: 0,' not in content:
@@ -458,6 +482,7 @@ def patch_js():
     if 'function CC_MetricsBar' not in content:
         # Replace n4 with detected React variable in template
         metrics_def = METRICS_COMPONENT_DEF.replace('n4.', f'{react_var}.')
+        metrics_def = metrics_def.replace('_Z();', f'{signal_hook}();')
 
         if prettified:
             # Prettified: insert as new lines before the footer function

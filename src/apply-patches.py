@@ -327,24 +327,34 @@ def is_already_patched(content):
     return "sessionMetrics_cc" in content
 
 
-def detect_react_var(content):
-    """Detect the React variable name (n4, o4, etc.) used in minified code."""
-    # Look for pattern: return XX.default.createElement("div",{className:WJ.inputFooter}
-    match = re.search(r'return ([a-zA-Z][a-zA-Z0-9]*)\.default\.createElement\("div",\{className:WJ\.inputFooter\}', content)
+def detect_css_module_var(content):
+    """Detect the CSS module variable name (WJ, KJ, etc.) that holds inputFooter."""
+    match = re.search(r'([a-zA-Z][a-zA-Z0-9]*)\.inputFooter', content)
     if match:
         return match.group(1)
-    # Fallback: look for any XX.default.createElement pattern
-    match = re.search(r'([a-zA-Z][a-zA-Z0-9]*)\.default\.createElement\("div"', content)
+    return "WJ"  # default fallback
+
+
+def detect_react_var(content, css_var="WJ"):
+    """Detect the React variable name (n4, o4, e4, etc.) used in minified code."""
+    # Look for pattern: return XX.default.createElement("div",{className:CSS.inputFooter}
+    pattern = r'return ([a-zA-Z][a-zA-Z0-9]*)\.default\.createElement\("div",\{className:' + re.escape(css_var) + r'\.inputFooter\}'
+    match = re.search(pattern, content)
+    if match:
+        return match.group(1)
+    # Fallback: look for any XX.default.createElement pattern near inputFooter
+    match = re.search(r'([a-zA-Z][a-zA-Z0-9]*)\.default\.createElement\("div",\{className:\w+\.inputFooter\}', content)
     if match:
         return match.group(1)
     return "n4"  # default fallback
 
 
-def detect_footer_component(content):
-    """Detect the footer component name (dP1, iP1, etc.) used after inputFooter."""
-    # Look for pattern: className:WJ.inputFooter},XX.default.createElement(COMP
+def detect_footer_component(content, css_var="WJ"):
+    """Detect the footer component name (dP1, iP1, FO1, etc.) used after inputFooter."""
+    # Look for pattern: className:CSS.inputFooter},XX.default.createElement(COMP
     # Exclude CC_MetricsBar which is our own injected component
-    match = re.search(r'className:WJ\.inputFooter\},[a-zA-Z0-9]*\.default\.createElement\(([a-zA-Z][a-zA-Z0-9]*)', content)
+    pattern = r'className:' + re.escape(css_var) + r'\.inputFooter\},[a-zA-Z0-9]*\.default\.createElement\(([a-zA-Z][a-zA-Z0-9]*)'
+    match = re.search(pattern, content)
     if match:
         comp = match.group(1)
         if comp == 'CC_MetricsBar':
@@ -356,12 +366,12 @@ def detect_footer_component(content):
     return "dP1"  # default fallback
 
 
-def detect_footer_function(content):
+def detect_footer_function(content, css_var="WJ"):
     """Detect the function name containing the inputFooter return (Yi0, Zi0, etc.)."""
     # Find the position of inputFooter usage in the code
-    footer_pos = content.find('className:WJ.inputFooter')
+    footer_pos = content.find(f'className:{css_var}.inputFooter')
     if footer_pos == -1:
-        footer_pos = content.find('className: WJ.inputFooter')
+        footer_pos = content.find(f'className: {css_var}.inputFooter')
     if footer_pos == -1:
         return None
 
@@ -388,9 +398,10 @@ def patch_js():
     print(f"  Format: {'prettified' if prettified else 'minified'}")
 
     # ─── Detect minified variable names ───
-    react_var = detect_react_var(content)
-    footer_comp = detect_footer_component(content)
-    print(f"  Detected: React={react_var}, FooterComp={footer_comp}")
+    css_var = detect_css_module_var(content)
+    react_var = detect_react_var(content, css_var)
+    footer_comp = detect_footer_component(content, css_var)
+    print(f"  Detected: CSS={css_var}, React={react_var}, FooterComp={footer_comp}")
 
     # ─── PATCH 0a: usageData signal - add individual token fields ───
     if 'inputTokens:0' not in content and 'inputTokens: 0,' not in content:
@@ -451,7 +462,7 @@ def patch_js():
         if prettified:
             # Prettified: insert as new lines before the footer function
             lines = content.split('\n')
-            footer_fn = detect_footer_function(content)
+            footer_fn = detect_footer_function(content, css_var)
             insert_line = None
 
             if footer_fn:
@@ -478,7 +489,7 @@ def patch_js():
             # Minified: use string replacement to inject before the footer function.
             # CANNOT use line-based insertion because minified code has multi-line
             # template literals that would swallow the injected code as string content.
-            footer_fn = detect_footer_function(content)
+            footer_fn = detect_footer_function(content, css_var)
             if footer_fn:
                 anchor = f'function {footer_fn}('
             else:
@@ -507,7 +518,7 @@ def patch_js():
 
             for i in range(len(lines)):
                 line = lines[i].strip()
-                if '{ className: WJ.inputFooter },' in line or '{className:WJ.inputFooter},' in line:
+                if f'{{ className: {css_var}.inputFooter }},' in line or f'{{className:{css_var}.inputFooter}},' in line:
                     # Check if footer_comp is on the same line (post-clean scenario)
                     comp_marker = f'{react_var}.default.createElement({footer_comp}'
                     if footer_comp in lines[i]:
@@ -542,8 +553,8 @@ def patch_js():
 
             content = '\n'.join(lines)
         else:
-            old_str = f'return {react_var}.default.createElement("div",{{className:WJ.inputFooter}},{react_var}.default.createElement({footer_comp}'
-            new_str = f'return {react_var}.default.createElement("div",{{className:WJ.inputFooter}},{metrics_bar_call}{react_var}.default.createElement({footer_comp}'
+            old_str = f'return {react_var}.default.createElement("div",{{className:{css_var}.inputFooter}},{react_var}.default.createElement({footer_comp}'
+            new_str = f'return {react_var}.default.createElement("div",{{className:{css_var}.inputFooter}},{metrics_bar_call}{react_var}.default.createElement({footer_comp}'
 
             if old_str not in content:
                 print("  ERROR: Could not find inputFooter injection point (minified mode)")

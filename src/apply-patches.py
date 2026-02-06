@@ -2,10 +2,12 @@
 """Apply UI patches to Claude Code VSCode extension webview.
 
 Handles both minified and prettified (beautified) code formats.
-v9.1: Lucide SVG icons + Stranger Things color palette + unified text color.
+v10: Lucide SVG icons + Stranger Things color palette + unified text color.
     Row1: model/cost/ctx. Row2: In(total,cache%)/Out.
     Row3: 5hr usage%/7d usage%/session time/last activity.
     Row4: 5hr reset countdown + bar / 7d reset countdown + bar.
+    Row5: thinking level/msg count/output utilization.
+    Row6: cost rate/throughput/compaction counter.
     Avatar: Funko Pop Dustin (48px display, 128px retina) with gradient "DUSTIN" label.
     Layout: flexbox row (metrics left, avatar right).
     Icons: Lucide SVG (inline, unified accent #e04040).
@@ -45,7 +47,7 @@ if not os.path.exists(_B64_PATH):
     _B64_PATH = os.path.join(_SCRIPT_DIR, "dustin_128.b64")  # fallback: same dir
 DUSTIN_IMG_B64 = open(_B64_PATH).read().strip() if os.path.exists(_B64_PATH) else ""
 
-# ─── Session Metrics Component v9 (Lucide icons + ST palette + avatar + reset countdowns) ───
+# ─── Session Metrics Component v10 (v9 + thinking level, msg count, output util, cost rate, throughput, compaction) ───
 _METRICS_TEMPLATE = r"""
 var _ccSessionStart = Date.now();
 var _ccAccent = "#e04040";
@@ -64,6 +66,8 @@ var _ccP = {
   clock: [["path",{d:"M12 6v6l4 2"}],["circle",{cx:"12",cy:"12",r:"10"}]],
   calClock: [["path",{d:"M16 14v2.2l1.6 1"}],["path",{d:"M16 2v4"}],["path",{d:"M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"}],["path",{d:"M3 10h5"}],["path",{d:"M8 2v4"}],["circle",{cx:"16",cy:"16",r:"6"}]],
   dot: [["circle",{cx:"12",cy:"12",r:"10"}],["circle",{cx:"12",cy:"12",r:"1"}]],
+  msgSquare: [["path",{d:"M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"}]],
+  gauge: [["path",{d:"m12 14 4-4"}],["path",{d:"M3.34 19a10 10 0 1 1 17.32 0"}]],
 };
 function _ccIcon(name, sz, clr) {
   var paths = _ccP[name];
@@ -96,6 +100,7 @@ function CC_MetricsBar({ session: S }) {
     var _t = setInterval(function() { S.requestUsageUpdate(); }, 60000);
     return function() { clearInterval(_t); };
   }, []);
+  var _compactRef = n4.useRef({ count: 0, prevTokens: 0, wasLow: false });
   var ud = S.usageData.value;
   var model = S.currentMainLoopModel.value || "\u2014";
   var cost = ud.totalCost != null ? ud.totalCost.toFixed(4) : "0.0000";
@@ -139,6 +144,26 @@ function CC_MetricsBar({ session: S }) {
   var itm = { display: "inline-flex", alignItems: "center", gap: "3px" };
   var u5hStr = u5h != null ? Math.floor(u5h) + "%" : "--";
   var u7dStr = u7d != null ? Math.floor(u7d) + "%" : "--";
+  var thinkLvl = S.thinkingLevel ? (S.thinkingLevel.value || "off") : "off";
+  var thinkColors = { off: _ccDim, low: "#44bb44", medium: "#ddaa00", high: "#ff4444" };
+  var thinkClr = thinkColors[thinkLvl] || _ccDim;
+  var msgCount = S.messages && S.messages.value ? S.messages.value.length : 0;
+  var outPct = maxOut > 0 && outTok > 0 ? Math.round(outTok / maxOut * 100) : 0;
+  var outMaxStr = maxOut > 0 ? (maxOut / 1000).toFixed(0) + "k" : "?";
+  var costVal = parseFloat(cost);
+  var costRate = sesMin > 0 ? (costVal / sesMin * 60) : 0;
+  var costRateStr = costRate > 0 ? "$" + costRate.toFixed(2) + "/hr" : "--";
+  var throughput = sesMin > 0 ? Math.round((rawIn + outTok) / sesMin) : 0;
+  var throughStr = throughput > 0 ? throughput.toLocaleString() + " tok/min" : "--";
+  if (_compactRef.current.prevTokens > 500 && totalTok < 100 && !_compactRef.current.wasLow) {
+    _compactRef.current.count += 1;
+    _compactRef.current.wasLow = true;
+  }
+  if (totalTok > 500) {
+    _compactRef.current.wasLow = false;
+  }
+  _compactRef.current.prevTokens = totalTok;
+  var compactCount = _compactRef.current.count;
   return n4.default.createElement("div", {
     className: "sessionMetrics_cc",
     style: {
@@ -183,6 +208,20 @@ function CC_MetricsBar({ session: S }) {
         n4.default.createElement("span", { style: sep }, "|"),
         n4.default.createElement("span", { style: itm }, _ccIcon("calClock", 12, _ccAccent), "7d reset", r7dTime ? _ccV(r7dTime) : _ccV("--"), r7dCd ? "(" + r7dCd + ")" : null, _ccBar(r7dPct, _ccAccent, 40)),
       ),
+      n4.default.createElement("div", { style: row },
+        n4.default.createElement("span", { style: itm }, _ccIcon("brain", 12, thinkClr), "Think:", n4.default.createElement("span", { style: { color: thinkClr, fontWeight: "bold" } }, thinkLvl.toUpperCase())),
+        n4.default.createElement("span", { style: sep }, "|"),
+        n4.default.createElement("span", { style: itm }, _ccIcon("msgSquare", 12, _ccAccent), _ccV(msgCount + ""), "msgs"),
+        n4.default.createElement("span", { style: sep }, "|"),
+        n4.default.createElement("span", { style: itm }, _ccIcon("arrowUp", 12, _ccAccent), "Out:", _ccBar(outPct, _ccAccent, 40), _ccV(outPct + "%"), "(" + outTok.toLocaleString() + "/" + outMaxStr + ")"),
+      ),
+      n4.default.createElement("div", { style: row },
+        n4.default.createElement("span", { style: itm }, _ccIcon("dollar", 12, _ccAccent), _ccV(costRateStr)),
+        n4.default.createElement("span", { style: sep }, "|"),
+        n4.default.createElement("span", { style: itm }, _ccIcon("gauge", 12, _ccAccent), _ccV(throughStr)),
+        compactCount > 0 && n4.default.createElement("span", { style: sep }, "|"),
+        compactCount > 0 && n4.default.createElement("span", { style: itm }, _ccIcon("layers", 12, _ccAccent), "Compact:", _ccV(compactCount + "x")),
+      ),
     ),
     _ccAvatar(),
   );
@@ -192,9 +231,7 @@ function CC_MetricsBar({ session: S }) {
 # Resolve base64 placeholder
 METRICS_COMPONENT_DEF = _METRICS_TEMPLATE.replace("__DUSTIN_B64__", DUSTIN_IMG_B64)
 
-METRICS_BAR_CALL = 'n4.default.createElement(CC_MetricsBar, { session: $ }),'
-
-# ─── usageData signal patches ───
+# ─── usageData signal patches (prettified) ───
 USAGE_DATA_ORIGINAL = """\
   usageData = g1({
     totalTokens: 0,
@@ -215,7 +252,12 @@ USAGE_DATA_PATCHED = """\
     cacheRead: 0,
   });"""
 
-# ─── updateUsage() patches ───
+# ─── usageData signal patches (minified) - signal function varies (g1, p1, etc.) ───
+# Pattern: usageData=XX({totalTokens:0,totalCost:0,contextWindow:0,maxOutputTokens:0})
+USAGE_DATA_MIN_PATTERN = r'usageData=([a-zA-Z][a-zA-Z0-9]*)\(\{totalTokens:0,totalCost:0,contextWindow:0,maxOutputTokens:0\}\)'
+USAGE_DATA_MIN_REPLACE = r'usageData=\1({totalTokens:0,totalCost:0,contextWindow:0,maxOutputTokens:0,inputTokens:0,outputTokens:0,cacheCreation:0,cacheRead:0})'
+
+# ─── updateUsage() patches (prettified) ───
 UPDATE_USAGE_ORIGINAL = """\
     this.usageData.value = {
       totalTokens: J,
@@ -238,7 +280,11 @@ UPDATE_USAGE_PATCHED = """\
     };
   }"""
 
-# ─── result handler patches ───
+# ─── updateUsage() patches (minified) ───
+UPDATE_USAGE_MIN_ORIGINAL = 'usageData.value={totalTokens:J,totalCost:Z.totalCost,contextWindow:Z.contextWindow,maxOutputTokens:Z.maxOutputTokens}'
+UPDATE_USAGE_MIN_PATCHED = 'usageData.value={totalTokens:J,totalCost:Z.totalCost,contextWindow:Z.contextWindow,maxOutputTokens:Z.maxOutputTokens,inputTokens:$.input_tokens||0,outputTokens:(Z.outputTokens||0)+($.output_tokens||0),cacheCreation:$.cache_creation_input_tokens||0,cacheRead:$.cache_read_input_tokens||0}'
+
+# ─── result handler patches (prettified) ───
 RESULT_HANDLER_ORIGINAL = """\
         this.usageData.value = {
           totalTokens: J.totalTokens,
@@ -259,9 +305,15 @@ RESULT_HANDLER_PATCHED = """\
           cacheRead: J.cacheRead || 0,
         };"""
 
+# ─── result handler patches (minified) ───
+RESULT_HANDLER_MIN_ORIGINAL = 'usageData.value={totalTokens:J.totalTokens,totalCost:$.total_cost_usd,contextWindow:X,maxOutputTokens:Q}'
+RESULT_HANDLER_MIN_PATCHED = 'usageData.value={totalTokens:J.totalTokens,totalCost:$.total_cost_usd,contextWindow:X,maxOutputTokens:Q,inputTokens:J.inputTokens||0,outputTokens:J.outputTokens||0,cacheCreation:J.cacheCreation||0,cacheRead:J.cacheRead||0}'
+
 # ─── compact_boundary patches ───
 COMPACT_ORIGINAL = "{ ...this.usageData.value, totalTokens: 0 }"
 COMPACT_PATCHED = "{ ...this.usageData.value, totalTokens: 0, inputTokens: 0, outputTokens: 0, cacheCreation: 0, cacheRead: 0 }"
+COMPACT_MIN_ORIGINAL = "{...this.usageData.value,totalTokens:0}"
+COMPACT_MIN_PATCHED = "{...this.usageData.value,totalTokens:0,inputTokens:0,outputTokens:0,cacheCreation:0,cacheRead:0}"
 
 
 def is_prettified(content):
@@ -275,6 +327,56 @@ def is_already_patched(content):
     return "sessionMetrics_cc" in content
 
 
+def detect_react_var(content):
+    """Detect the React variable name (n4, o4, etc.) used in minified code."""
+    # Look for pattern: return XX.default.createElement("div",{className:WJ.inputFooter}
+    match = re.search(r'return ([a-zA-Z][a-zA-Z0-9]*)\.default\.createElement\("div",\{className:WJ\.inputFooter\}', content)
+    if match:
+        return match.group(1)
+    # Fallback: look for any XX.default.createElement pattern
+    match = re.search(r'([a-zA-Z][a-zA-Z0-9]*)\.default\.createElement\("div"', content)
+    if match:
+        return match.group(1)
+    return "n4"  # default fallback
+
+
+def detect_footer_component(content):
+    """Detect the footer component name (dP1, iP1, etc.) used after inputFooter."""
+    # Look for pattern: className:WJ.inputFooter},XX.default.createElement(COMP
+    # Exclude CC_MetricsBar which is our own injected component
+    match = re.search(r'className:WJ\.inputFooter\},[a-zA-Z0-9]*\.default\.createElement\(([a-zA-Z][a-zA-Z0-9]*)', content)
+    if match:
+        comp = match.group(1)
+        if comp == 'CC_MetricsBar':
+            # Already patched, look for the next createElement after CC_MetricsBar
+            match2 = re.search(r'createElement\(CC_MetricsBar[^)]*\),[a-zA-Z0-9]*\.default\.createElement\(([a-zA-Z][a-zA-Z0-9]*)', content)
+            if match2:
+                return match2.group(1)
+        return comp
+    return "dP1"  # default fallback
+
+
+def detect_footer_function(content):
+    """Detect the function name containing the inputFooter return (Yi0, Zi0, etc.)."""
+    # Find the position of inputFooter usage in the code
+    footer_pos = content.find('className:WJ.inputFooter')
+    if footer_pos == -1:
+        footer_pos = content.find('className: WJ.inputFooter')
+    if footer_pos == -1:
+        return None
+
+    # Search backwards from inputFooter to find the enclosing function definition.
+    # Look for the last "function XXXX(" before this position.
+    # We search a reasonable chunk before the inputFooter reference.
+    search_start = max(0, footer_pos - 5000)
+    chunk = content[search_start:footer_pos]
+    # Find all function definitions in this chunk; take the last one
+    matches = list(re.finditer(r'function ([a-zA-Z][a-zA-Z0-9]*)\(', chunk))
+    if matches:
+        return matches[-1].group(1)
+    return None
+
+
 def patch_js():
     """Patch webview/index.js with session metrics bar + token tracking."""
     print("[1/3] Patching webview/index.js...")
@@ -285,31 +387,45 @@ def patch_js():
     prettified = is_prettified(content)
     print(f"  Format: {'prettified' if prettified else 'minified'}")
 
+    # ─── Detect minified variable names ───
+    react_var = detect_react_var(content)
+    footer_comp = detect_footer_component(content)
+    print(f"  Detected: React={react_var}, FooterComp={footer_comp}")
+
     # ─── PATCH 0a: usageData signal - add individual token fields ───
-    if 'inputTokens: 0,' not in content:
+    if 'inputTokens:0' not in content and 'inputTokens: 0,' not in content:
         if USAGE_DATA_ORIGINAL in content:
             content = content.replace(USAGE_DATA_ORIGINAL, USAGE_DATA_PATCHED, 1)
-            print("  OK: usageData signal patched (added individual token fields)")
+            print("  OK: usageData signal patched (prettified)")
+        elif re.search(USAGE_DATA_MIN_PATTERN, content):
+            content = re.sub(USAGE_DATA_MIN_PATTERN, USAGE_DATA_MIN_REPLACE, content, count=1)
+            print("  OK: usageData signal patched (minified)")
         else:
             print("  WARNING: Could not find usageData original pattern")
     else:
         print("  SKIP: usageData already patched")
 
     # ─── PATCH 0b: updateUsage() - store individual tokens ───
-    if 'inputTokens: $.input_tokens' not in content:
+    if 'inputTokens:$.input_tokens' not in content and 'inputTokens: $.input_tokens' not in content:
         if UPDATE_USAGE_ORIGINAL in content:
             content = content.replace(UPDATE_USAGE_ORIGINAL, UPDATE_USAGE_PATCHED, 1)
-            print("  OK: updateUsage() patched (stores individual tokens)")
+            print("  OK: updateUsage() patched (prettified)")
+        elif UPDATE_USAGE_MIN_ORIGINAL in content:
+            content = content.replace(UPDATE_USAGE_MIN_ORIGINAL, UPDATE_USAGE_MIN_PATCHED, 1)
+            print("  OK: updateUsage() patched (minified)")
         else:
             print("  WARNING: Could not find updateUsage() original pattern")
     else:
         print("  SKIP: updateUsage() already patched")
 
     # ─── PATCH 0c: result handler - preserve individual tokens ───
-    if 'inputTokens: J.inputTokens' not in content:
+    if 'inputTokens:J.inputTokens' not in content and 'inputTokens: J.inputTokens' not in content:
         if RESULT_HANDLER_ORIGINAL in content:
             content = content.replace(RESULT_HANDLER_ORIGINAL, RESULT_HANDLER_PATCHED, 1)
-            print("  OK: result handler patched (preserves individual tokens)")
+            print("  OK: result handler patched (prettified)")
+        elif RESULT_HANDLER_MIN_ORIGINAL in content:
+            content = content.replace(RESULT_HANDLER_MIN_ORIGINAL, RESULT_HANDLER_MIN_PATCHED, 1)
+            print("  OK: result handler patched (minified)")
         else:
             print("  WARNING: Could not find result handler original pattern")
     else:
@@ -318,34 +434,73 @@ def patch_js():
     # ─── PATCH 0d: compact_boundary - reset individual tokens ───
     if COMPACT_ORIGINAL in content:
         content = content.replace(COMPACT_ORIGINAL, COMPACT_PATCHED, 1)
-        print("  OK: compact_boundary patched (resets individual tokens)")
-    elif COMPACT_PATCHED in content:
+        print("  OK: compact_boundary patched (prettified)")
+    elif COMPACT_MIN_ORIGINAL in content:
+        content = content.replace(COMPACT_MIN_ORIGINAL, COMPACT_MIN_PATCHED, 1)
+        print("  OK: compact_boundary patched (minified)")
+    elif COMPACT_PATCHED in content or COMPACT_MIN_PATCHED in content:
         print("  SKIP: compact_boundary already patched")
     else:
         print("  WARNING: Could not find compact_boundary pattern")
 
-    # ─── PATCH 1a: Define CC_MetricsBar component before Zi0 ───
+    # ─── PATCH 1a: Define CC_MetricsBar component ───
     if 'function CC_MetricsBar' not in content:
-        lines = content.split('\n')
+        # Replace n4 with detected React variable in template
+        metrics_def = METRICS_COMPONENT_DEF.replace('n4.', f'{react_var}.')
 
-        zi0_line = None
-        for i, line in enumerate(lines):
-            if 'function Zi0({' in line or 'function Zi0(' in line:
-                zi0_line = i
-                break
+        if prettified:
+            # Prettified: insert as new lines before the footer function
+            lines = content.split('\n')
+            footer_fn = detect_footer_function(content)
+            insert_line = None
 
-        if zi0_line is None:
-            print("  ERROR: Could not find Zi0 function definition!")
-            return False
+            if footer_fn:
+                for i, line in enumerate(lines):
+                    if f'function {footer_fn}(' in line:
+                        insert_line = i
+                        break
 
-        lines.insert(zi0_line, METRICS_COMPONENT_DEF)
-        print(f"  OK: CC_MetricsBar + _ccAvatar + _ccDustinImg defined at line {zi0_line}")
-        content = '\n'.join(lines)
+            if insert_line is None:
+                # Fallback: search for any function line near inputFooter
+                for i, line in enumerate(lines):
+                    if 'function Zi0({' in line or 'function Zi0(' in line:
+                        insert_line = i
+                        break
+
+            if insert_line is None:
+                print("  ERROR: Could not find footer function definition!")
+                return False
+
+            lines.insert(insert_line, metrics_def)
+            print(f"  OK: CC_MetricsBar defined at line {insert_line} (prettified)")
+            content = '\n'.join(lines)
+        else:
+            # Minified: use string replacement to inject before the footer function.
+            # CANNOT use line-based insertion because minified code has multi-line
+            # template literals that would swallow the injected code as string content.
+            footer_fn = detect_footer_function(content)
+            if footer_fn:
+                anchor = f'function {footer_fn}('
+            else:
+                print("  ERROR: Could not detect footer function name!")
+                return False
+
+            if anchor not in content:
+                print(f"  ERROR: Could not find anchor '{anchor}' in content!")
+                return False
+
+            # Inject the component definition right before the footer function.
+            # The definition ends with a closing brace+newline; add a newline separator.
+            content = content.replace(anchor, metrics_def + '\n' + anchor, 1)
+            print(f"  OK: CC_MetricsBar defined before {footer_fn} (minified, string replacement)")
     else:
         print("  SKIP: CC_MetricsBar already defined")
 
-    # ─── PATCH 1b: Insert CC_MetricsBar call inside Zi0's return ───
-    if 'CC_MetricsBar' in content and METRICS_BAR_CALL not in content:
+    # ─── PATCH 1b: Insert CC_MetricsBar call inside footer function's return ───
+    # Build dynamic METRICS_BAR_CALL with correct React var
+    metrics_bar_call = f'{react_var}.default.createElement(CC_MetricsBar, {{ session: $ }}),'
+
+    if 'CC_MetricsBar' in content and 'createElement(CC_MetricsBar' not in content:
         if prettified:
             lines = content.split('\n')
             injected = False
@@ -353,24 +508,28 @@ def patch_js():
             for i in range(len(lines)):
                 line = lines[i].strip()
                 if '{ className: WJ.inputFooter },' in line or '{className:WJ.inputFooter},' in line:
-                    # Check if dP1 is on the same line (post-clean scenario)
-                    if 'dP1' in lines[i]:
+                    # Check if footer_comp is on the same line (post-clean scenario)
+                    comp_marker = f'{react_var}.default.createElement({footer_comp}'
+                    if footer_comp in lines[i]:
                         indent = "    "
                         old_line = lines[i]
-                        dp1_idx = old_line.index('n4.default.createElement(dP1')
-                        part1 = old_line[:dp1_idx].rstrip()
-                        part2 = indent + old_line[dp1_idx:]
+                        try:
+                            comp_idx = old_line.index(comp_marker)
+                        except ValueError:
+                            comp_idx = old_line.index(f'.default.createElement({footer_comp}')
+                        part1 = old_line[:comp_idx].rstrip()
+                        part2 = indent + old_line[comp_idx:]
                         lines[i] = part1
-                        lines.insert(i + 1, indent + METRICS_BAR_CALL)
+                        lines.insert(i + 1, indent + metrics_bar_call)
                         lines.insert(i + 2, part2)
                         injected = True
                         print(f"  OK: CC_MetricsBar call injected at line {i+1} (same-line split)")
                         break
-                    # Normal case: dP1 on next line
+                    # Normal case: footer_comp on next line
                     for j in range(i + 1, min(i + 5, len(lines))):
-                        if 'dP1' in lines[j]:
+                        if footer_comp in lines[j]:
                             indent = "    "
-                            lines.insert(j, indent + METRICS_BAR_CALL)
+                            lines.insert(j, indent + metrics_bar_call)
                             injected = True
                             print(f"  OK: CC_MetricsBar call injected at line {j}")
                             break
@@ -378,21 +537,22 @@ def patch_js():
                         break
 
             if not injected:
-                print("  ERROR: Could not find Zi0 injection point (prettified mode)")
+                print("  ERROR: Could not find inputFooter injection point (prettified mode)")
                 return False
 
             content = '\n'.join(lines)
         else:
-            old_str = 'return n4.default.createElement("div",{className:WJ.inputFooter},n4.default.createElement(dP1'
-            new_str = f'return n4.default.createElement("div",{{className:WJ.inputFooter}},{METRICS_BAR_CALL}n4.default.createElement(dP1'
+            old_str = f'return {react_var}.default.createElement("div",{{className:WJ.inputFooter}},{react_var}.default.createElement({footer_comp}'
+            new_str = f'return {react_var}.default.createElement("div",{{className:WJ.inputFooter}},{metrics_bar_call}{react_var}.default.createElement({footer_comp}'
 
             if old_str not in content:
-                print("  ERROR: Could not find Zi0 injection point (minified mode)")
+                print("  ERROR: Could not find inputFooter injection point (minified mode)")
+                print(f"         Looking for: {old_str[:80]}...")
                 return False
 
             content = content.replace(old_str, new_str, 1)
             print("  OK: CC_MetricsBar call injected (minified)")
-    elif METRICS_BAR_CALL in content:
+    elif 'createElement(CC_MetricsBar' in content:
         print("  SKIP: CC_MetricsBar call already injected")
 
     # ─── PATCH 2: Make er0 always visible ───
@@ -462,7 +622,7 @@ def patch_css():
     # ─── Append custom styles (if not already there) ───
     if '.sessionMetrics_cc' not in content:
         custom_css = (
-            '\n/* Custom Session Metrics Bar - cc-improve v9 */'
+            '\n/* Custom Session Metrics Bar - cc-improve v10 */'
             '\n.sessionMetrics_cc{font-family:var(--vscode-editor-font-family),monospace;letter-spacing:0.3px}'
             '\n.sessionMetrics_cc span{white-space:nowrap}'
             '\n.sessionMetrics_cc svg{flex-shrink:0}'
@@ -524,10 +684,10 @@ def verify():
         ("JS: icons used in Row2", '_ccIcon("arrowDown"' in js and '_ccIcon("arrowUp"' in js),
         ("JS: icons used in Row3", '_ccIcon("zap"' in js and '_ccIcon("calDays"' in js and '_ccIcon("timer"' in js),
         ("JS: icons used in Row4", '_ccIcon("clock"' in js and '_ccIcon("calClock"' in js),
-        ("JS: usageData has inputTokens", "inputTokens: 0," in js),
-        ("JS: updateUsage stores individual tokens", "inputTokens: $.input_tokens" in js),
-        ("JS: result handler preserves tokens", "inputTokens: J.inputTokens" in js),
-        ("JS: compact_boundary resets tokens", "inputTokens: 0, outputTokens: 0" in js),
+        ("JS: usageData has inputTokens", "inputTokens:0" in js or "inputTokens: 0," in js),
+        ("JS: updateUsage stores individual tokens", "inputTokens:$.input_tokens" in js or "inputTokens: $.input_tokens" in js),
+        ("JS: result handler preserves tokens", "inputTokens:J.inputTokens" in js or "inputTokens: J.inputTokens" in js),
+        ("JS: compact_boundary resets tokens", "inputTokens:0,outputTokens:0" in js or "inputTokens: 0, outputTokens: 0" in js),
         ("JS: Row2 shows totalIn with cache%", "cachePct" in js),
         ("JS: Row3 utilization signals", "S.utilization.value" in js),
         ("JS: Row3 session time", "_ccSessionStart" in js and "sesMin" in js),
@@ -543,6 +703,14 @@ def verify():
         ("CSS: ST palette button", "--app-claude-clay-button-orange:#b82030" in css),
         ("CSS: ST input border", "inputContainer_cKsPxg" in css and "rgba(224,64,64" in css),
         ("JS: dim/accent color scheme (values via _ccV)", "_ccV(" in js and "color: _ccDim" in js),
+        ("JS: Row5 thinking level", "thinkLvl" in js and "thinkClr" in js),
+        ("JS: Row5 message count", "msgCount" in js),
+        ("JS: Row5 output utilization", "outPct" in js and "outMaxStr" in js),
+        ("JS: Row6 cost rate", "costRateStr" in js),
+        ("JS: Row6 throughput", "throughStr" in js),
+        ("JS: Row6 compaction counter", "_compactRef" in js and "compactCount" in js),
+        ("JS: icons used in Row5", '_ccIcon("msgSquare"' in js),
+        ("JS: icons used in Row6", '_ccIcon("gauge"' in js),
     ]
 
     all_ok = True
@@ -618,20 +786,26 @@ def clean():
     pattern_def = r'\nfunction CC_MetricsBar\(\{[^}]*\}.*?\n\}\n'
     js_clean = re.sub(pattern_def, '\n', js_clean, count=1, flags=re.DOTALL)
 
-    # Remove CC_MetricsBar call in Zi0 (preserve surrounding newlines)
-    js_clean = re.sub(r'^[ \t]*n4\.default\.createElement\(CC_MetricsBar,\s*\{[^}]*\}\),?\n', '', js_clean, count=1, flags=re.MULTILINE)
+    # Remove CC_MetricsBar call in Zi0 - handle both prettified (with newlines) and minified (inline)
+    # Pattern covers both: {session:$} (no spaces) and { session: $ } (with spaces)
+    js_clean = re.sub(r'[a-zA-Z][a-zA-Z0-9]*\.default\.createElement\(CC_MetricsBar,\s*\{[^}]*\}\),?', '', js_clean, count=1)
 
-    # Reverse usageData signal patch
+    # Reverse usageData signal patch (prettified and minified)
     js_clean = js_clean.replace(USAGE_DATA_PATCHED, USAGE_DATA_ORIGINAL)
+    # For minified: remove added fields from usageData signal
+    js_clean = re.sub(r',inputTokens:0,outputTokens:0,cacheCreation:0,cacheRead:0\}', '}', js_clean)
 
-    # Reverse updateUsage() patch
+    # Reverse updateUsage() patch (prettified and minified)
     js_clean = js_clean.replace(UPDATE_USAGE_PATCHED, UPDATE_USAGE_ORIGINAL)
+    js_clean = js_clean.replace(UPDATE_USAGE_MIN_PATCHED, UPDATE_USAGE_MIN_ORIGINAL)
 
-    # Reverse result handler patch
+    # Reverse result handler patch (prettified and minified)
     js_clean = js_clean.replace(RESULT_HANDLER_PATCHED, RESULT_HANDLER_ORIGINAL)
+    js_clean = js_clean.replace(RESULT_HANDLER_MIN_PATCHED, RESULT_HANDLER_MIN_ORIGINAL)
 
-    # Reverse compact_boundary patch
+    # Reverse compact_boundary patch (prettified and minified)
     js_clean = js_clean.replace(COMPACT_PATCHED, COMPACT_ORIGINAL)
+    js_clean = js_clean.replace(COMPACT_MIN_PATCHED, COMPACT_MIN_ORIGINAL)
 
     # Restore er0 visibility check
     js_clean = js_clean.replace('/* patched: always show */', 'if (U >= 50) return null;')
@@ -662,7 +836,7 @@ def main():
 
     if mode == "apply":
         print("=" * 60)
-        print("cc-metrics v9.1: Applying UI patches to Claude Code Extension")
+        print("cc-metrics v10: Applying UI patches to Claude Code Extension")
         print("=" * 60)
         print(f"Extension: {EXT_DIR}")
         print(f"JS size: {os.path.getsize(WEBVIEW_JS):,} bytes")

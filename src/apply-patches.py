@@ -2,8 +2,8 @@
 """Apply UI patches to Claude Code VSCode extension webview.
 
 Handles both minified and prettified (beautified) code formats.
-v10: Lucide SVG icons + Stranger Things color palette + unified text color.
-    Row1: model/cost/ctx. Row2: In(total,cache%)/Out.
+v12: Fix $-prefixed var names (v2.1.37+), fix black text (forced dark bg + accent class).
+    Row1: model/cost/ctx. Row2: In(total,cache%)/Out/Workdir/GitBranch.
     Row3: 5hr usage%/7d usage%/session time/last activity.
     Row4: 5hr reset countdown + bar / 7d reset countdown + bar.
     Row5: thinking level/msg count/output utilization.
@@ -47,12 +47,12 @@ if not os.path.exists(_B64_PATH):
     _B64_PATH = os.path.join(_SCRIPT_DIR, "dustin_128.b64")  # fallback: same dir
 DUSTIN_IMG_B64 = open(_B64_PATH).read().strip() if os.path.exists(_B64_PATH) else ""
 
-# ─── Session Metrics Component v10 (v9 + thinking level, msg count, output util, cost rate, throughput, compaction) ───
+# ─── Session Metrics Component v12 (inside inputFooter with flex-wrap) ───
 _METRICS_TEMPLATE = r"""
 var _ccSessionStart = Date.now();
 var _ccAccent = "#e04040";
 var _ccDim = "rgba(255,255,255,0.55)";
-function _ccV(t) { return n4.default.createElement("span", { style: { color: _ccAccent } }, t); }
+function _ccV(t) { return n4.default.createElement("span", { className: "cc-accent", style: { color: _ccAccent } }, t); }
 var _ccP = {
   brain: [["path",{d:"M12 18V5"}],["path",{d:"M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"}],["path",{d:"M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"}],["path",{d:"M17.997 5.125a4 4 0 0 1 2.526 5.77"}],["path",{d:"M18 18a4 4 0 0 0 2-7.464"}],["path",{d:"M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"}],["path",{d:"M6 18a4 4 0 0 1-2-7.464"}],["path",{d:"M6.003 5.125a4 4 0 0 0-2.526 5.77"}]],
   dollar: [["line",{x1:"12",x2:"12",y1:"2",y2:"22"}],["path",{d:"M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"}]],
@@ -68,6 +68,8 @@ var _ccP = {
   dot: [["circle",{cx:"12",cy:"12",r:"10"}],["circle",{cx:"12",cy:"12",r:"1"}]],
   msgSquare: [["path",{d:"M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"}]],
   gauge: [["path",{d:"m12 14 4-4"}],["path",{d:"M3.34 19a10 10 0 1 1 17.32 0"}]],
+  folder: [["path",{d:"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"}]],
+  gitBr: [["line",{x1:"6",x2:"6",y1:"3",y2:"15"}],["circle",{cx:"18",cy:"6",r:"3"}],["circle",{cx:"6",cy:"18",r:"3"}],["path",{d:"M18 9a9 9 0 0 1-9 9"}]],
 };
 function _ccIcon(name, sz, clr) {
   var paths = _ccP[name];
@@ -155,6 +157,11 @@ function CC_MetricsBar({ session: S }) {
   var costRateStr = costRate > 0 ? "$" + costRate.toFixed(2) + "/hr" : "--";
   var throughput = sesMin > 0 ? Math.round((rawIn + outTok) / sesMin) : 0;
   var throughStr = throughput > 0 ? throughput.toLocaleString() + " tok/min" : "--";
+  var cwdRaw = S.cwd && S.cwd.value ? S.cwd.value : "";
+  var cwdStr = cwdRaw.replace(/^\/home\/[^/]+/, "~");
+  var cwdParts = cwdStr.split("/");
+  if (cwdParts.length > 3) cwdStr = "~/" + cwdParts.slice(-2).join("/");
+  var gitBr = S.gitBranch && S.gitBranch.value ? S.gitBranch.value : "";
   if (_compactRef.current.prevTokens > 500 && totalTok < 100 && !_compactRef.current.wasLow) {
     _compactRef.current.count += 1;
     _compactRef.current.wasLow = true;
@@ -167,19 +174,18 @@ function CC_MetricsBar({ session: S }) {
   return n4.default.createElement("div", {
     className: "sessionMetrics_cc",
     style: {
-      width: "100%",
       display: "flex",
       flexDirection: "row",
       fontSize: "11px",
       padding: "3px 6px",
-      borderBottom: ".5px solid var(--app-input-border)",
-      marginBottom: "2px",
+      borderBottom: ".5px solid rgba(224,64,64,0.15)",
       gap: "8px",
       alignItems: "center",
       color: _ccDim,
+      overflow: "hidden",
     },
   },
-    n4.default.createElement("div", { style: { display: "flex", flexDirection: "column", flex: "1", gap: "2px", minWidth: 0 } },
+    n4.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
       n4.default.createElement("div", { style: row },
         n4.default.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "3px", fontWeight: "600" } }, _ccIcon("brain", 12, _ccAccent), _ccV(model)),
         n4.default.createElement("span", { style: sep }, "|"),
@@ -193,6 +199,10 @@ function CC_MetricsBar({ session: S }) {
         n4.default.createElement("span", { style: itm }, _ccIcon("arrowDown", 12, _ccAccent), "In:", _ccV(totalIn.toLocaleString()), cachePct > 0 ? "(" + cachePct + "% cached)" : null),
         n4.default.createElement("span", { style: sep }, "|"),
         n4.default.createElement("span", { style: itm }, _ccIcon("arrowUp", 12, _ccAccent), "Out:", _ccV(outTok.toLocaleString())),
+        cwdStr && n4.default.createElement("span", { style: sep }, "|"),
+        cwdStr && n4.default.createElement("span", { style: itm }, _ccIcon("folder", 12, _ccAccent), _ccV(cwdStr)),
+        gitBr && n4.default.createElement("span", { style: sep }, "|"),
+        gitBr && n4.default.createElement("span", { style: itm }, _ccIcon("gitBr", 12, _ccAccent), _ccV(gitBr)),
       ),
       n4.default.createElement("div", { style: row },
         n4.default.createElement("span", { style: itm }, _ccIcon("zap", 12, _ccAccent), "5hr:", _ccBar(u5h || 0, _ccAccent, 40), _ccV(u5hStr)),
@@ -316,6 +326,10 @@ COMPACT_MIN_ORIGINAL = "{...this.usageData.value,totalTokens:0}"
 COMPACT_MIN_PATCHED = "{...this.usageData.value,totalTokens:0,inputTokens:0,outputTokens:0,cacheCreation:0,cacheRead:0}"
 
 
+# JavaScript identifier pattern: can start with $, _, or letter
+_JS_ID = r'[\$_a-zA-Z][\$_a-zA-Z0-9]*'
+
+
 def is_prettified(content):
     """Check if file is prettified (multi-line) vs minified."""
     lines = content.split('\n')
@@ -329,7 +343,7 @@ def is_already_patched(content):
 
 def detect_css_module_var(content):
     """Detect the CSS module variable name (WJ, KJ, etc.) that holds inputFooter."""
-    match = re.search(r'([a-zA-Z][a-zA-Z0-9]*)\.inputFooter', content)
+    match = re.search(r'(' + _JS_ID + r')\.inputFooter', content)
     if match:
         return match.group(1)
     return "WJ"  # default fallback
@@ -338,12 +352,12 @@ def detect_css_module_var(content):
 def detect_react_var(content, css_var="WJ"):
     """Detect the React variable name (n4, o4, e4, etc.) used in minified code."""
     # Look for pattern: return XX.default.createElement("div",{className:CSS.inputFooter}
-    pattern = r'return ([a-zA-Z][a-zA-Z0-9]*)\.default\.createElement\("div",\{className:' + re.escape(css_var) + r'\.inputFooter\}'
+    pattern = r'return (' + _JS_ID + r')\.default\.createElement\("div",\{className:' + re.escape(css_var) + r'\.inputFooter\}'
     match = re.search(pattern, content)
     if match:
         return match.group(1)
     # Fallback: look for any XX.default.createElement pattern near inputFooter
-    match = re.search(r'([a-zA-Z][a-zA-Z0-9]*)\.default\.createElement\("div",\{className:\w+\.inputFooter\}', content)
+    match = re.search(r'(' + _JS_ID + r')\.default\.createElement\("div",\{className:' + _JS_ID + r'\.inputFooter\}', content)
     if match:
         return match.group(1)
     return "n4"  # default fallback
@@ -353,15 +367,15 @@ def detect_footer_component(content, css_var="WJ"):
     """Detect the footer component name (dP1, iP1, FO1, etc.) used after inputFooter."""
     # Look for pattern: className:CSS.inputFooter},XX.default.createElement(COMP
     # Exclude CC_MetricsBar which is our own injected component
-    pattern = r'className:' + re.escape(css_var) + r'\.inputFooter\},[a-zA-Z0-9]*\.default\.createElement\(([a-zA-Z][a-zA-Z0-9]*)'
+    pattern = r'className:' + re.escape(css_var) + r'\.inputFooter\},(' + _JS_ID + r')\.default\.createElement\((' + _JS_ID + r')'
     match = re.search(pattern, content)
     if match:
-        comp = match.group(1)
+        comp = match.group(2)
         if comp == 'CC_MetricsBar':
             # Already patched, look for the next createElement after CC_MetricsBar
-            match2 = re.search(r'createElement\(CC_MetricsBar[^)]*\),[a-zA-Z0-9]*\.default\.createElement\(([a-zA-Z][a-zA-Z0-9]*)', content)
+            match2 = re.search(r'createElement\(CC_MetricsBar[^)]*\),(' + _JS_ID + r')\.default\.createElement\((' + _JS_ID + r')', content)
             if match2:
-                return match2.group(1)
+                return match2.group(2)
         return comp
     return "dP1"  # default fallback
 
@@ -377,13 +391,13 @@ def detect_signal_hook(content, css_var="WJ"):
     # Find the footer function definition (last function before inputFooter)
     search_start = max(0, footer_pos - 5000)
     chunk = content[search_start:footer_pos]
-    fn_matches = list(re.finditer(r'function \w+\(\{[^}]+\}\)\{', chunk))
+    fn_matches = list(re.finditer(r'function ' + _JS_ID + r'\(\{[^}]+\}\)\{', chunk))
     if not fn_matches:
-        fn_matches = list(re.finditer(r'function \w+\([^)]+\)\{', chunk))
+        fn_matches = list(re.finditer(r'function ' + _JS_ID + r'\([^)]+\)\{', chunk))
     if fn_matches:
         body_start = fn_matches[-1].end()
         body = chunk[body_start:body_start+30]
-        call = re.match(r'(\w+)\(\)', body)
+        call = re.match(r'(' + _JS_ID + r')\(\)', body)
         if call:
             return call.group(1)
     return "_Z"  # default fallback
@@ -404,7 +418,7 @@ def detect_footer_function(content, css_var="WJ"):
     search_start = max(0, footer_pos - 5000)
     chunk = content[search_start:footer_pos]
     # Find all function definitions in this chunk; take the last one
-    matches = list(re.finditer(r'function ([a-zA-Z][a-zA-Z0-9]*)\(', chunk))
+    matches = list(re.finditer(r'function (' + _JS_ID + r')\(', chunk))
     if matches:
         return matches[-1].group(1)
     return None
@@ -532,7 +546,7 @@ def patch_js():
     else:
         print("  SKIP: CC_MetricsBar already defined")
 
-    # ─── PATCH 1b: Insert CC_MetricsBar call inside footer function's return ───
+    # ─── PATCH 1b: Insert CC_MetricsBar as sibling ABOVE inputFooter via wrapper div ───
     # Build dynamic METRICS_BAR_CALL with correct React var
     metrics_bar_call = f'{react_var}.default.createElement(CC_MetricsBar, {{ session: $ }}),'
 
@@ -578,23 +592,28 @@ def patch_js():
 
             content = '\n'.join(lines)
         else:
-            old_str = f'return {react_var}.default.createElement("div",{{className:{css_var}.inputFooter}},{react_var}.default.createElement({footer_comp}'
-            new_str = f'return {react_var}.default.createElement("div",{{className:{css_var}.inputFooter}},{metrics_bar_call}{react_var}.default.createElement({footer_comp}'
+            # Minified: add CC_MetricsBar as FIRST CHILD of inputFooter.
+            # Layout may be squeezed but we can fix with CSS (flex-wrap).
+            #
+            # Original: return R.createElement("div",{className:CSS.inputFooter}, ...children...)
+            # Patched:  return R.createElement("div",{className:CSS.inputFooter}, CC_MetricsBar, ...children...)
+            old_return = f'return {react_var}.default.createElement("div",{{className:{css_var}.inputFooter}},'
+            new_return = old_return + metrics_bar_call
 
-            if old_str not in content:
-                print("  ERROR: Could not find inputFooter injection point (minified mode)")
-                print(f"         Looking for: {old_str[:80]}...")
+            if old_return not in content:
+                print("  ERROR: Could not find inputFooter return (minified mode)")
+                print(f"         Looking for: {old_return[:80]}...")
                 return False
 
-            content = content.replace(old_str, new_str, 1)
-            print("  OK: CC_MetricsBar call injected (minified)")
+            content = content.replace(old_return, new_return, 1)
+            print("  OK: CC_MetricsBar injected as first child of inputFooter (minified)")
     elif 'createElement(CC_MetricsBar' in content:
         print("  SKIP: CC_MetricsBar call already injected")
 
     # ─── PATCH 2: Make er0 always visible ───
     er0_patterns = [
         ('if (U >= 50) return null;', '/* patched: always show */'),
-        ('if(U>=50)return null}', '}'),
+        ('if(U>=50)return null}', '/*er0*/}'),
         ('if(U>=50)return null;', '/* patched: always show */'),
     ]
 
@@ -628,40 +647,14 @@ def patch_css():
 
     changed = False
 
-    # ─── Add flex-wrap to inputFooter (if not already there) ───
-    if 'flex-wrap:wrap' not in content and 'flex-wrap: wrap' not in content:
-        patterns = [
-            ('display:flex;color:var(--app-secondary-foreground);border-top:.5px solid var(--app-input-border);z-index:1;align-items: center;gap:6px;min-width:0;padding:5px}',
-             'display:flex;flex-wrap:wrap;color:var(--app-secondary-foreground);border-top:.5px solid var(--app-input-border);z-index:1;align-items:center;gap:6px;min-width:0;padding:5px}'),
-            ('display:flex;color:var(--app-secondary-foreground);border-top:.5px solid var(--app-input-border);z-index:1;align-items:center;gap:6px;min-width:0;padding:5px}',
-             'display:flex;flex-wrap:wrap;color:var(--app-secondary-foreground);border-top:.5px solid var(--app-input-border);z-index:1;align-items:center;gap:6px;min-width:0;padding:5px}'),
-        ]
-
-        for old_css, new_css in patterns:
-            if old_css in content:
-                content = content.replace(old_css, new_css, 1)
-                print("  OK: Added flex-wrap to inputFooter")
-                changed = True
-                break
-
-        if not changed:
-            match = re.search(r'(\.inputFooter_gGYT1w\{display:flex;)', content)
-            if match:
-                content = content.replace(match.group(1), match.group(1) + 'flex-wrap:wrap;', 1)
-                print("  OK: Added flex-wrap to inputFooter (regex fallback)")
-                changed = True
-            else:
-                print("  WARNING: Could not add flex-wrap (inputFooter CSS not found)")
-    else:
-        print("  SKIP: flex-wrap already present")
+    # CC_MetricsBar is INSIDE inputFooter. Add flex-wrap so it gets its own row.
 
     # ─── Append custom styles (if not already there) ───
     if '.sessionMetrics_cc' not in content:
         custom_css = (
-            '\n/* Custom Session Metrics Bar - cc-improve v10 */'
-            '\n.sessionMetrics_cc{font-family:var(--vscode-editor-font-family),monospace;letter-spacing:0.3px}'
-            '\n.sessionMetrics_cc span{white-space:nowrap}'
-            '\n.sessionMetrics_cc svg{flex-shrink:0}'
+            '\n/* Custom Session Metrics Bar - cc-improve v12-debug */'
+            '\n.inputFooter_gGYT1w{flex-wrap:wrap !important}'
+            '\n.sessionMetrics_cc{flex:0 0 100% !important;order:-1 !important}'
         )
         content += custom_css
         print("  OK: Custom CSS appended")
@@ -714,6 +707,7 @@ def verify():
         ("JS: _ccAvatar function present", "function _ccAvatar()" in js),
         ("JS: metrics component present", "function CC_MetricsBar" in js),
         ("JS: metrics bar in DOM", "sessionMetrics_cc" in js),
+        ("JS: CC_MetricsBar call injected", 'createElement(CC_MetricsBar' in js),
         ("JS: row layout (flexDirection row)", 'flexDirection: "row"' in js),
         ("JS: avatar called", "_ccAvatar()" in js),
         ("JS: icons used in Row1", '_ccIcon("brain"' in js and '_ccIcon("dollar"' in js and '_ccIcon("layers"' in js),
@@ -733,12 +727,12 @@ def verify():
             'if (U >= 50) return null;' not in js and
             'if(U>=50)return null}' not in js and
             'if(U>=50)return null;' not in js),
-        ("CSS: flex-wrap", "flex-wrap:wrap" in css or "flex-wrap: wrap" in css),
         ("CSS: custom styles", ".sessionMetrics_cc" in css),
+        ("CSS: flex-wrap on inputFooter", "flex-wrap:wrap" in css),
         ("CSS: ST palette accent", "--app-claude-orange:#e04040" in css),
         ("CSS: ST palette button", "--app-claude-clay-button-orange:#b82030" in css),
         ("CSS: ST input border", "inputContainer_cKsPxg" in css and "rgba(224,64,64" in css),
-        ("JS: dim/accent color scheme (values via _ccV)", "_ccV(" in js and "color: _ccDim" in js),
+        ("JS: dim/accent color scheme", "_ccV(" in js and "color: _ccDim" in js),
         ("JS: Row5 thinking level", "thinkLvl" in js and "thinkClr" in js),
         ("JS: Row5 message count", "msgCount" in js),
         ("JS: Row5 output utilization", "outPct" in js and "outMaxStr" in js),
@@ -747,6 +741,9 @@ def verify():
         ("JS: Row6 compaction counter", "_compactRef" in js and "compactCount" in js),
         ("JS: icons used in Row5", '_ccIcon("msgSquare"' in js),
         ("JS: icons used in Row6", '_ccIcon("gauge"' in js),
+        ("JS: Row2 workdir display", "cwdStr" in js and "cwdRaw" in js and "S.cwd" in js),
+        ("JS: Row2 git branch display", "gitBr" in js and "S.gitBranch" in js),
+        ("JS: icons used in Row2 (folder+gitBr)", '_ccIcon("folder"' in js and '_ccIcon("gitBr"' in js),
     ]
 
     all_ok = True
@@ -787,6 +784,16 @@ def clean():
     with open(WEBVIEW_JS, 'r') as f:
         js = f.read()
 
+    # For minified code: remove entire metrics block as a single unit.
+    # In minified code, 'function ai0(' was in the MIDDLE of a huge line.
+    # The injection split it with newlines. Clean must rejoin by removing
+    # ALL newlines around the block (replace with empty string, not '\n').
+    if not is_prettified(js) and 'var _ccSessionStart' in js:
+        js = re.sub(
+            r'\n+var _ccSessionStart = Date\.now\(\);.*?function CC_MetricsBar\(\{[^}]*\}\)[^\n]*\n.*?\n\}\n*',
+            '', js, count=1, flags=re.DOTALL
+        )
+
     # Remove _ccSessionStart variable
     js_clean = re.sub(r'\nvar _ccSessionStart = Date\.now\(\);\n', '\n', js, count=1)
 
@@ -822,9 +829,12 @@ def clean():
     pattern_def = r'\nfunction CC_MetricsBar\(\{[^}]*\}.*?\n\}\n'
     js_clean = re.sub(pattern_def, '\n', js_clean, count=1, flags=re.DOTALL)
 
-    # Remove CC_MetricsBar call in Zi0 - handle both prettified (with newlines) and minified (inline)
+    # Remove CC_MetricsBar call - handle both prettified (with newlines) and minified (inline)
     # Pattern covers both: {session:$} (no spaces) and { session: $ } (with spaces)
-    js_clean = re.sub(r'[a-zA-Z][a-zA-Z0-9]*\.default\.createElement\(CC_MetricsBar,\s*\{[^}]*\}\),?', '', js_clean, count=1)
+    js_clean = re.sub(r'' + _JS_ID + r'\.default\.createElement\(CC_MetricsBar,\s*\{[^}]*\}\),?', '', js_clean, count=1)
+
+    # No wrapper div to remove — CC_MetricsBar is inside inputFooter.
+    # The CC_MetricsBar createElement call removal (above) handles it.
 
     # Reverse usageData signal patch (prettified and minified)
     js_clean = js_clean.replace(USAGE_DATA_PATCHED, USAGE_DATA_ORIGINAL)
@@ -844,6 +854,7 @@ def clean():
     js_clean = js_clean.replace(COMPACT_MIN_PATCHED, COMPACT_MIN_ORIGINAL)
 
     # Restore er0 visibility check
+    js_clean = js_clean.replace('/*er0*/}', 'if(U>=50)return null}')
     js_clean = js_clean.replace('/* patched: always show */', 'if (U >= 50) return null;')
 
     with open(WEBVIEW_JS, 'w') as f:
@@ -857,8 +868,7 @@ def clean():
     css = re.sub(r'\n/\* Custom Session Metrics Bar.*$', '', css, flags=re.DOTALL)
     # Remove ST palette CSS (in case it was added separately)
     css = re.sub(r'\n/\* ST palette \*/.*$', '', css, flags=re.DOTALL)
-    # Remove flex-wrap
-    css = css.replace('flex-wrap:wrap;', '')
+    # Note: inputFooter CSS is no longer modified (wrapper approach), no revert needed
 
     with open(WEBVIEW_CSS, 'w') as f:
         f.write(css)
@@ -872,7 +882,7 @@ def main():
 
     if mode == "apply":
         print("=" * 60)
-        print("cc-metrics v10: Applying UI patches to Claude Code Extension")
+        print("cc-metrics v12: Applying UI patches to Claude Code Extension")
         print("=" * 60)
         print(f"Extension: {EXT_DIR}")
         print(f"JS size: {os.path.getsize(WEBVIEW_JS):,} bytes")
